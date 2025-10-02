@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import jwt, { Secret } from "jsonwebtoken";
+import jwt, { Secret, SignOptions } from "jsonwebtoken";
 import User from "../models/User";
 
 // Generate JWT token with proper typing
@@ -12,10 +12,11 @@ const signToken = (id: string, role: string): string => {
 
   const payload = { id, role };
 
-  // Fix: Cast expiresIn as string | number
-  return jwt.sign(payload, secret as Secret, {
-    expiresIn: (process.env.JWT_EXPIRES_IN || "90d") as string | number,
-  });
+  // ✅ Fix: cast expiresIn safely
+  const expiresIn = (process.env.JWT_EXPIRES_IN ||
+    "90d") as unknown as SignOptions["expiresIn"];
+
+  return jwt.sign(payload, secret as Secret, { expiresIn });
 };
 
 export const login = async (req: Request, res: Response) => {
