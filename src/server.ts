@@ -7,7 +7,6 @@ import { Server } from "socket.io";
 import connectDB from "./config/database";
 
 // Import routes
-import dashboardRoutes from "./routes/dashboardRoutes";
 import authRoutes from "./routes/authRoutes";
 import menuRoutes from "./routes/menuRoutes";
 import orderRoutes from "./routes/orderRoutes";
@@ -15,24 +14,37 @@ import staffRoutes from "./routes/staffRoutes";
 import categoryRoutes from "./routes/categoryRoutes";
 import addOnRoutes from "./routes/addOnRoutes";
 import settingsRoutes from "./routes/settingsRoutes";
+import dashboardRoutes from "./routes/dashboardRoutes";
+
 dotenv.config();
 
 const app = express();
 const httpServer = createServer(app);
+
+// Socket.IO with proper CORS
 const io = new Server(httpServer, {
   cors: {
-    origin: "*",
+    origin: "*", // Allow all origins for now
     methods: ["GET", "POST", "PATCH", "DELETE"],
+    credentials: true,
+    allowedHeaders: ["Content-Type", "Authorization"],
   },
+  transports: ["websocket", "polling"], // Allow both transports
+  allowEIO3: true, // Allow compatibility
 });
 
 // Middleware
-app.use(helmet());
-app.use(cors());
+app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
+app.use(
+  cors({
+    origin: "*",
+    credentials: true,
+  })
+);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Request logging middleware
+// Request logging
 app.use((req, res, next) => {
   console.log(`${req.method} ${req.path}`);
   next();
@@ -49,9 +61,8 @@ app.get("/health", (req, res) => {
 
 // Socket.IO connection handling
 io.on("connection", (socket) => {
-  console.log("Client connected:", socket.id);
+  console.log("✅ Client connected:", socket.id);
 
-  // Join role-based room
   socket.on("join_role", (data) => {
     const room = `${data.role}_room`;
     socket.join(room);
@@ -59,7 +70,7 @@ io.on("connection", (socket) => {
   });
 
   socket.on("disconnect", () => {
-    console.log("Client disconnected:", socket.id);
+    console.log("❌ Client disconnected:", socket.id);
   });
 
   socket.on("error", (error) => {
@@ -79,7 +90,8 @@ app.use("/api/v1/categories", categoryRoutes);
 app.use("/api/v1/addons", addOnRoutes);
 app.use("/api/v1/settings", settingsRoutes);
 app.use("/api/v1/dashboard", dashboardRoutes);
-// 404 handler - FIXED: Use without path parameter
+
+// 404 handler
 app.use((req, res) => {
   res.status(404).json({
     success: false,
@@ -121,18 +133,13 @@ httpServer.listen(PORT, () => {
   console.log("   GET  /health");
   console.log("   POST /api/v1/auth/login");
   console.log("   GET  /api/v1/menu/items");
-  console.log("   GET  /api/v1/menu/categories");
-  console.log("   POST /api/v1/orders");
   console.log("   GET  /api/v1/orders/active");
-  console.log("   GET  /api/v1/staff");
-  console.log("   GET  /api/v1/categories");
-  console.log("   GET  /api/v1/addons");
   console.log("\n✨ Server ready!\n");
 });
 
-// Handle unhandled promise rejections
+// Handle unhandled rejections
 process.on("unhandledRejection", (err: Error) => {
-  console.error("UNHANDLED REJECTION! 💥 Shutting down...");
+  console.error("UNHANDLED REJECTION! Shutting down...");
   console.error(err.name, err.message);
   httpServer.close(() => {
     process.exit(1);
@@ -141,7 +148,7 @@ process.on("unhandledRejection", (err: Error) => {
 
 // Handle uncaught exceptions
 process.on("uncaughtException", (err: Error) => {
-  console.error("UNCAUGHT EXCEPTION! 💥 Shutting down...");
+  console.error("UNCAUGHT EXCEPTION! Shutting down...");
   console.error(err.name, err.message);
   process.exit(1);
 });
