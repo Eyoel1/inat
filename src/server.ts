@@ -22,7 +22,7 @@ dotenv.config();
 const app = express();
 const httpServer = createServer(app);
 
-// Socket.IO with proper CORS
+// Socket.IO setup
 const io = new Server(httpServer, {
   cors: {
     origin: "*",
@@ -58,8 +58,7 @@ app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
 // Request logging
 app.use((req, res, next) => {
-  const timestamp = new Date().toISOString();
-  console.log(`[${timestamp}] ${req.method} ${req.path}`);
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
   next();
 });
 
@@ -70,125 +69,145 @@ app.get("/health", (req, res) => {
     timestamp: new Date(),
     uptime: process.uptime(),
     environment: process.env.NODE_ENV || "development",
+    database:
+      mongoose.connection.readyState === 1 ? "connected" : "disconnected",
   });
 });
 
-// Temporary endpoint to fix database indexes (remove after use)
+// --- Fix Indexes Endpoint ---
 app.post("/api/v1/fix-indexes", async (req, res) => {
   try {
     const db = mongoose.connection.db;
-    if (!db) {
-      return res.status(500).json({
-        success: false,
-        message: "Database not connected",
-      });
-    }
+    if (!db)
+      return res
+        .status(500)
+        .json({ success: false, message: "Database not connected" });
 
-    console.log("\n=== Fixing Database Indexes ===");
+    console.log("\n🔧 Fixing database indexes...");
 
-    // Fix MenuItem indexes
-    console.log("Fixing MenuItem indexes...");
-    const menuItems = db.collection("menuitems");
-    const menuIndexes = await menuItems.indexes();
-
-    for (const index of menuIndexes) {
-      if (
-        index.name !== "_id_" &&
-        (index.name === "name_1" ||
-          index.name === "name_am_1" ||
-          index.name === "name_en_1")
-      ) {
-        console.log(`Dropping old MenuItem index: ${index.name}`);
-        try {
-          await menuItems.dropIndex(index.name);
-        } catch (error) {
-          console.log(`Could not drop ${index.name}, might not exist`);
-        }
-      }
-    }
-
-    // Fix Category indexes
-    console.log("Fixing Category indexes...");
-    const categories = db.collection("categories");
-    const catIndexes = await categories.indexes();
-
-    for (const index of catIndexes) {
-      if (
-        index.name !== "_id_" &&
-        (index.name === "name_1" ||
-          index.name === "name_am_1" ||
-          index.name === "name_en_1")
-      ) {
-        console.log(`Dropping old Category index: ${index.name}`);
-        try {
-          await categories.dropIndex(index.name);
-        } catch (error) {
-          console.log(`Could not drop ${index.name}, might not exist`);
-        }
-      }
-    }
-
-    // Clean up null values
-    console.log("Cleaning up null values...");
-    const menuDeleted = await menuItems.deleteMany({
-      $or: [{ nameEn: null }, { nameAm: null }],
-    });
-    const catDeleted = await categories.deleteMany({
-      $or: [{ nameEn: null }, { nameAm: null }],
-    });
-
-    console.log(`Deleted ${menuDeleted.deletedCount} invalid menu items`);
-    console.log(`Deleted ${catDeleted.deletedCount} invalid categories`);
-
-    // Create new indexes
-    console.log("Creating new indexes...");
-    await menuItems.createIndex({ nameEn: 1 }, { unique: true, sparse: true });
-    await menuItems.createIndex({ nameAm: 1 }, { unique: true, sparse: true });
-    await categories.createIndex({ nameEn: 1 }, { unique: true, sparse: true });
-    await categories.createIndex({ nameAm: 1 }, { unique: true, sparse: true });
-
-    console.log("✅ Indexes fixed successfully!\n");
-
-    res.json({
-      success: true,
-      message: "Indexes fixed successfully",
-      details: {
-        menuItemsDeleted: menuDeleted.deletedCount,
-        categoriesDeleted: catDeleted.deletedCount,
+    const collections = [
+      {
+        name: "menuitems",
+        uniqueFields: ["nameEn", "nameAm"],
+        additionalFields: ["categoryId", "station"],
       },
-    });
-  } catch (error: any) {
-    console.error("Error fixing indexes:", error);
-    res.status(500).json({
-      success: false,
-      error: error.message,
-    });
+      {
+        name: "categories",
+        uniqueFields: ["nameEn", "nameAm"],
+        additionalFields: ["station"],
+      },
+    ];
+
+    const results: any = {};
+
+    for (const col of collections) {
+      const collection = db.collection(col.name);
+      const indexes = await collection.indexes();
+      results[col.name] = { dropped: [], created: [], errors: [], deleted: 0 };
+
+      console.log(`\n📦 Processing collection: ${col.name}`);
+      console.log("Existing indexes:", indexes.map((i) => i.name).join(", "));
+
+      // Drop all non-_id_ indexes
+      for (const index of indexes) {
+        const indexName = index.name || "";
+        if (indexName && indexName !== "_id_") {
+          try {
+            await collection.dropIndex(indexName);
+            results[col.name].dropped.push(indexName);
+            console.log(`  ✓ Dropped index: ${indexName}`);
+          } catch (err: any) {
+            results[col.name].errors.push({
+              index: indexName,
+              error: err.message,
+            });
+            console.log(
+              `  ✗ Failed to drop index: ${indexName} (${err.message})`
+            );
+          }
+        }
+      }
+
+      // Remove invalid documents
+      const deleteQuery: any = {
+        $or: [
+          { nameEn: null },
+          { nameAm: null },
+          { name: null },
+          { nameEn: "" },
+          { nameAm: "" },
+        ],
+      };
+      const deleted = await collection.deleteMany(deleteQuery);
+      results[col.name].deleted = deleted.deletedCount || 0;
+      console.log(`  🧹 Deleted ${deleted.deletedCount} invalid documents`);
+
+      // Create new indexes
+      for (const field of col.uniqueFields) {
+        try {
+          await collection.createIndex({ [field]: 1 }, { unique: true });
+          results[col.name].created.push(`${field}_1`);
+          console.log(`  ✓ Created unique index: ${field}_1`);
+        } catch (err: any) {
+          results[col.name].errors.push({
+            index: `${field}_1`,
+            error: err.message,
+          });
+          console.log(
+            `  ✗ Failed to create index: ${field}_1 (${err.message})`
+          );
+        }
+      }
+
+      for (const field of col.additionalFields) {
+        try {
+          await collection.createIndex({ [field]: 1 });
+          results[col.name].created.push(`${field}_1`);
+          console.log(`  ✓ Created index: ${field}_1`);
+        } catch (err: any) {
+          results[col.name].errors.push({
+            index: `${field}_1`,
+            error: err.message,
+          });
+          console.log(
+            `  ✗ Failed to create index: ${field}_1 (${err.message})`
+          );
+        }
+      }
+
+      // Final index list
+      const finalIndexes = await collection.indexes();
+      results[col.name].finalIndexes = finalIndexes.map((i) => i.name);
+    }
+
+    res.json({ success: true, message: "Indexes fixed successfully", results });
+  } catch (err: any) {
+    console.error("❌ Error fixing indexes:", err);
+    res
+      .status(500)
+      .json({ success: false, error: err.message, stack: err.stack });
   }
 });
 
-// Socket.IO connection handling
+// --- Socket.IO ---
 io.on("connection", (socket) => {
   console.log("✅ Client connected:", socket.id);
 
   socket.on("join_role", (data) => {
     const room = `${data.role}_room`;
     socket.join(room);
-    console.log(`Socket ${socket.id} joined ${room}`);
+    console.log(`Socket ${socket.id} joined room ${room}`);
   });
 
-  socket.on("disconnect", () => {
-    console.log("❌ Client disconnected:", socket.id);
-  });
-
-  socket.on("error", (error) => {
-    console.error("Socket error:", error);
-  });
+  socket.on("disconnect", () =>
+    console.log("❌ Client disconnected:", socket.id)
+  );
+  socket.on("error", (err) => console.error("Socket error:", err));
 });
 
-// Make io accessible to routes
 app.set("io", io);
 
-// API Routes
+// --- API Routes ---
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/menu", menuRoutes);
 app.use("/api/v1/orders", orderRoutes);
@@ -198,33 +217,26 @@ app.use("/api/v1/addons", addOnRoutes);
 app.use("/api/v1/settings", settingsRoutes);
 app.use("/api/v1/dashboard", dashboardRoutes);
 
-// Root route
+// Root
 app.get("/", (req, res) => {
   res.json({
     message: "Inat Food POS API",
     version: "1.0.0",
     status: "running",
-    endpoints: {
-      health: "/health",
-      auth: "/api/v1/auth",
-      menu: "/api/v1/menu",
-      orders: "/api/v1/orders",
-      staff: "/api/v1/staff",
-      categories: "/api/v1/categories",
-      addons: "/api/v1/addons",
-      settings: "/api/v1/settings",
-      dashboard: "/api/v1/dashboard",
-    },
+    database:
+      mongoose.connection.readyState === 1 ? "connected" : "disconnected",
   });
 });
 
-// 404 handler
-app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    message: `Route ${req.method} ${req.originalUrl} not found`,
-  });
-});
+// 404
+app.use((req, res) =>
+  res
+    .status(404)
+    .json({
+      success: false,
+      message: `Route ${req.method} ${req.originalUrl} not found`,
+    })
+);
 
 // Global error handler
 app.use(
@@ -235,7 +247,6 @@ app.use(
     next: express.NextFunction
   ) => {
     console.error("❌ Error:", err);
-
     res.status(err.statusCode || 500).json({
       success: false,
       message: err.message || "Internal server error",
@@ -247,82 +258,48 @@ app.use(
   }
 );
 
-// Connect to MongoDB
+// Connect to DB
 connectDB();
 
 const PORT = process.env.PORT || 3000;
 
-// Start server only after successful DB connection
 mongoose.connection.once("open", () => {
   httpServer.listen(PORT, () => {
-    console.log("\n" + "=".repeat(60));
-    console.log("🚀 INAT FOOD POS SERVER");
-    console.log("=".repeat(60));
+    console.log("\n🚀 INAT FOOD POS SERVER RUNNING");
     console.log(`📍 Port: ${PORT}`);
-    console.log(`🌍 Environment: ${process.env.NODE_ENV || "development"}`);
     console.log(`💾 Database: ${mongoose.connection.name}`);
-    console.log(`🔌 Socket.IO: Enabled`);
-    console.log("=".repeat(60));
-    console.log("\n📡 Available Routes:");
-    console.log("   GET  /health");
-    console.log("   GET  /");
-    console.log("   POST /api/v1/auth/login");
-    console.log("   GET  /api/v1/menu/items");
-    console.log("   GET  /api/v1/orders/active");
-    console.log("   PATCH /api/v1/orders/:id/status");
-    console.log("   GET  /api/v1/staff");
-    console.log("   GET  /api/v1/categories");
-    console.log("   GET  /api/v1/addons");
-    console.log("   GET  /api/v1/dashboard/stats");
-    console.log("   POST /api/v1/fix-indexes (temporary)");
-    console.log("=".repeat(60));
-    console.log("\n✨ Server ready and listening for connections!\n");
+    console.log("🔌 Socket.IO enabled");
   });
 });
 
-// Handle MongoDB connection errors
-mongoose.connection.on("error", (err) => {
-  console.error("❌ MongoDB connection error:", err);
-});
-
-mongoose.connection.on("disconnected", () => {
-  console.log("⚠️ MongoDB disconnected");
-});
-
-// Handle unhandled rejections
-process.on("unhandledRejection", (err: Error) => {
-  console.error("💥 UNHANDLED REJECTION! Shutting down...");
-  console.error(err.name, err.message);
-  console.error(err.stack);
-  httpServer.close(() => {
-    process.exit(1);
-  });
-});
-
-// Handle uncaught exceptions
-process.on("uncaughtException", (err: Error) => {
-  console.error("💥 UNCAUGHT EXCEPTION! Shutting down...");
-  console.error(err.name, err.message);
-  console.error(err.stack);
-  process.exit(1);
-});
+// MongoDB errors
+mongoose.connection.on("error", (err) =>
+  console.error("❌ MongoDB connection error:", err)
+);
+mongoose.connection.on("disconnected", () =>
+  console.log("⚠️ MongoDB disconnected")
+);
 
 // Graceful shutdown
-process.on("SIGTERM", () => {
-  console.log("👋 SIGTERM received. Shutting down gracefully...");
-  httpServer.close(() => {
-    console.log("✅ Process terminated!");
-    mongoose.connection.close();
+["SIGINT", "SIGTERM"].forEach((sig) => {
+  process.on(sig, () => {
+    console.log(`👋 ${sig} received. Shutting down gracefully...`);
+    httpServer.close(() => {
+      mongoose.connection.close();
+      console.log("✅ Process terminated!");
+      process.exit(0);
+    });
   });
 });
 
-process.on("SIGINT", () => {
-  console.log("\n👋 SIGINT received. Shutting down gracefully...");
-  httpServer.close(() => {
-    console.log("✅ Process terminated!");
-    mongoose.connection.close();
-    process.exit(0);
-  });
+process.on("unhandledRejection", (err: Error) => {
+  console.error("💥 UNHANDLED REJECTION! Shutting down...", err);
+  httpServer.close(() => process.exit(1));
+});
+
+process.on("uncaughtException", (err: Error) => {
+  console.error("💥 UNCAUGHT EXCEPTION! Shutting down...", err);
+  process.exit(1);
 });
 
 export { io };
