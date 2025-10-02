@@ -5,20 +5,13 @@ import {
   updateCategory,
   deleteCategory,
 } from "../controllers/categoryController";
-import { protect, restrictTo } from "../middleware/auth";
+import { protect, restrictTo } from "../middleware/authMiddleware";
 
 const router = express.Router();
 
-router.use(protect);
-
-router
-  .route("/")
-  .get(getAllCategories)
-  .post(restrictTo("owner"), createCategory);
-
-router
-  .route("/:id")
-  .patch(restrictTo("owner"), updateCategory)
-  .delete(restrictTo("owner"), deleteCategory);
+router.get("/", protect, getAllCategories);
+router.post("/", protect, restrictTo("owner"), createCategory);
+router.put("/:id", protect, restrictTo("owner"), updateCategory);
+router.delete("/:id", protect, restrictTo("owner"), deleteCategory);
 
 export default router;

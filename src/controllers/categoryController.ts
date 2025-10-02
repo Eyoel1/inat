@@ -7,10 +7,10 @@ export const getAllCategories = async (req: Request, res: Response) => {
 
     res.status(200).json({
       success: true,
-      count: categories.length,
       data: categories,
     });
   } catch (error) {
+    console.error("Get categories error:", error);
     res.status(500).json({
       success: false,
       message: "Error fetching categories",
@@ -23,10 +23,33 @@ export const createCategory = async (req: Request, res: Response) => {
   try {
     const { nameEn, nameAm, station } = req.body;
 
+    console.log("=== Create Category ===");
+    console.log("Data received:", { nameEn, nameAm, station });
+
+    // Validation
     if (!nameEn || !nameAm || !station) {
       return res.status(400).json({
         success: false,
-        message: "Please provide all required fields",
+        message: "Please provide nameEn, nameAm, and station",
+      });
+    }
+
+    if (!["kitchen", "juicebar"].includes(station)) {
+      return res.status(400).json({
+        success: false,
+        message: "Station must be either kitchen or juicebar",
+      });
+    }
+
+    // Check for duplicates
+    const existingCategory = await Category.findOne({
+      $or: [{ nameEn }, { nameAm }],
+    });
+
+    if (existingCategory) {
+      return res.status(400).json({
+        success: false,
+        message: "Category with this name already exists",
       });
     }
 
@@ -36,12 +59,16 @@ export const createCategory = async (req: Request, res: Response) => {
       station,
     });
 
+    console.log("Category created successfully:", category._id);
+
     res.status(201).json({
       success: true,
       data: category,
+      message: "Category created successfully",
     });
   } catch (error) {
-    res.status(400).json({
+    console.error("Create category error:", error);
+    res.status(500).json({
       success: false,
       message: "Error creating category",
       error: error instanceof Error ? error.message : "Unknown error",
@@ -53,6 +80,17 @@ export const updateCategory = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { nameEn, nameAm, station } = req.body;
+
+    console.log("=== Update Category ===");
+    console.log("Category ID:", id);
+    console.log("Data:", { nameEn, nameAm, station });
+
+    if (!nameEn || !nameAm || !station) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide nameEn, nameAm, and station",
+      });
+    }
 
     const category = await Category.findByIdAndUpdate(
       id,
@@ -67,12 +105,16 @@ export const updateCategory = async (req: Request, res: Response) => {
       });
     }
 
+    console.log("Category updated successfully");
+
     res.status(200).json({
       success: true,
       data: category,
+      message: "Category updated successfully",
     });
   } catch (error) {
-    res.status(400).json({
+    console.error("Update category error:", error);
+    res.status(500).json({
       success: false,
       message: "Error updating category",
       error: error instanceof Error ? error.message : "Unknown error",
@@ -84,6 +126,9 @@ export const deleteCategory = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 
+    console.log("=== Delete Category ===");
+    console.log("Category ID:", id);
+
     const category = await Category.findByIdAndDelete(id);
 
     if (!category) {
@@ -93,12 +138,15 @@ export const deleteCategory = async (req: Request, res: Response) => {
       });
     }
 
+    console.log("Category deleted successfully");
+
     res.status(200).json({
       success: true,
       message: "Category deleted successfully",
     });
   } catch (error) {
-    res.status(400).json({
+    console.error("Delete category error:", error);
+    res.status(500).json({
       success: false,
       message: "Error deleting category",
       error: error instanceof Error ? error.message : "Unknown error",
