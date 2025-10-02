@@ -55,6 +55,17 @@ export const createMenuItem = async (req: Request, res: Response) => {
       });
     }
 
+    // Validate and sanitize image URL - reject file:// URLs
+    let validImageUrl = "https://via.placeholder.com/400x300?text=Menu+Item";
+    if (imageUrl) {
+      if (imageUrl.startsWith("http://") || imageUrl.startsWith("https://")) {
+        validImageUrl = imageUrl;
+      } else if (imageUrl.startsWith("file://")) {
+        console.log("Rejected file:// URL, using placeholder");
+        validImageUrl = "https://via.placeholder.com/400x300?text=Menu+Item";
+      }
+    }
+
     // Check for duplicates
     const existingItem = await MenuItem.findOne({
       $or: [{ nameEn }, { nameAm }],
@@ -73,7 +84,7 @@ export const createMenuItem = async (req: Request, res: Response) => {
       price: parseFloat(price),
       categoryId,
       station,
-      imageUrl: imageUrl || "https://via.placeholder.com/400x300?text=No+Image",
+      imageUrl: validImageUrl,
       addOns: addOns || [],
       costPerServing: costPerServing ? parseFloat(costPerServing) : undefined,
       inStock: inStock !== undefined ? inStock : true,
@@ -103,7 +114,7 @@ export const createMenuItem = async (req: Request, res: Response) => {
 export const updateMenuItem = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const updateData = req.body;
+    const updateData = { ...req.body };
 
     console.log("=== Update Menu Item ===");
     console.log("Item ID:", id);
@@ -115,6 +126,20 @@ export const updateMenuItem = async (req: Request, res: Response) => {
     }
     if (updateData.costPerServing) {
       updateData.costPerServing = parseFloat(updateData.costPerServing);
+    }
+
+    // Validate image URL if provided
+    if (updateData.imageUrl) {
+      if (updateData.imageUrl.startsWith("file://")) {
+        updateData.imageUrl =
+          "https://via.placeholder.com/400x300?text=Menu+Item";
+      } else if (
+        !updateData.imageUrl.startsWith("http://") &&
+        !updateData.imageUrl.startsWith("https://")
+      ) {
+        updateData.imageUrl =
+          "https://via.placeholder.com/400x300?text=Menu+Item";
+      }
     }
 
     const menuItem = await MenuItem.findByIdAndUpdate(id, updateData, {
