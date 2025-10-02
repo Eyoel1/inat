@@ -31,4 +31,9 @@ const CategorySchema = new Schema<ICategory>(
   }
 );
 
+// Create indexes
+CategorySchema.index({ nameEn: 1 }, { unique: true });
+CategorySchema.index({ nameAm: 1 }, { unique: true });
+CategorySchema.index({ station: 1 });
+
 export default mongoose.model<ICategory>("Category", CategorySchema);

@@ -1,13 +1,13 @@
-import mongoose, { Schema, Document } from "mongoose";
+import mongoose, { Schema, Document, Types } from "mongoose";
 
 export interface IMenuItem extends Document {
   nameEn: string;
   nameAm: string;
   price: number;
-  categoryId: mongoose.Types.ObjectId;
+  categoryId: Types.ObjectId;
   station: "kitchen" | "juicebar";
   imageUrl?: string;
-  addOns: mongoose.Types.ObjectId[];
+  addOns: Types.ObjectId[];
   costPerServing?: number;
   inStock: boolean;
   createdAt: Date;
@@ -43,7 +43,7 @@ const MenuItemSchema = new Schema<IMenuItem>(
     },
     imageUrl: {
       type: String,
-      trim: true,
+      default: "https://via.placeholder.com/400x300?text=No+Image",
     },
     addOns: [
       {
@@ -65,9 +65,10 @@ const MenuItemSchema = new Schema<IMenuItem>(
   }
 );
 
-// Index for faster queries
+// Remove old indexes and create new ones
+MenuItemSchema.index({ nameEn: 1 }, { unique: true });
+MenuItemSchema.index({ nameAm: 1 }, { unique: true });
 MenuItemSchema.index({ categoryId: 1 });
-MenuItemSchema.index({ inStock: 1 });
 MenuItemSchema.index({ station: 1 });
 
 export default mongoose.model<IMenuItem>("MenuItem", MenuItemSchema);
